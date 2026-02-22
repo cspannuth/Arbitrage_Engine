@@ -11,4 +11,4 @@ COPY . .
 
 EXPOSE 8000
 
-CMD sh -c "gunicorn -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:$PORT"
+CMD sh -c "gunicorn -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:$PORT"
