@@ -12,6 +12,13 @@ ODDS_API_FORMAT = "american"
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+CORS_ALLOW_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        "CORS_ALLOW_ORIGINS", "http://localhost:3000,http://localhost:5173"
+    ).split(",")
+    if origin.strip()
+]
 
 MONEYLINE_ARBITRAGE_TABLE = "moneyline_arbitrage_opportunities"
 MONEYLINE_CONFLICT_KEYS = "game_id,over_book,under_book"

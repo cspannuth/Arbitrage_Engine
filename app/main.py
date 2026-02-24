@@ -1,12 +1,26 @@
-from fastapi import FastAPI, Request, Header
+from fastapi import FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 import argparse
+from pydantic import BaseModel
 
-from app.config import get_prop_markets
+from app.config import CORS_ALLOW_ORIGINS, get_prop_markets
 from app.db import supabase_client
 from app.db.supabase_client import supabase
 from app.services import arbitrage_engine, odds_fetcher
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ALLOW_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+
+
+class FetchFromApiRequest(BaseModel):
+    sport: str
+    market: str
 
 
 @app.get("/arbitrage/moneyline")
@@ -46,16 +60,18 @@ def get_prop_arbitrage(min_profit: float = 0.0):
 
 def extract_auth_token(authorization: str | None):
     if not authorization or not authorization.startswith("Bearer "):
-        raise AssertionError
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header.")
     token = authorization.split(" ", 1)[1]
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing bearer token.")
     return token
 
-@app.get("/arbitrage/fetch")
-async def fetch_from_api(request: Request, authorization: str | None = Header(default=None)):
+@app.post("/arbitrage/fetch")
+async def fetch_from_api(payload: FetchFromApiRequest, authorization: str | None = Header(default=None)):
     """
-    Input: sport (str), market (str), key (str)
-    Output API Status (str)
-    A query based access point to call the arbitrage; Secured by a key value parameter.
+    Input: sport (str), market (str), Authorization bearer token
+    Output: dict
+    Trigger arbitrage processing from an authenticated frontend request.
     """
     jwt = extract_auth_token(authorization)
 
@@ -63,24 +79,29 @@ async def fetch_from_api(request: Request, authorization: str | None = Header(de
         user_response = supabase.auth.get_user(jwt)
         user = user_response.user
         if not user:
-            raise AssertionError
-    except Exception:
-        raise AssertionError
+            raise HTTPException(status_code=401, detail="Invalid or expired token.")
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Invalid or expired token.") from exc
 
-    body = await request.json()
-    sport = body.get("sport")
-    market = body.get("market")
+    sport = payload.sport
+    market = payload.market.lower()
 
     if not sport or not market:
-        raise AssertionError
+        raise HTTPException(status_code=400, detail="Both sport and market are required.")
     
-    if(market == "prop"):
+    if market == "prop":
         fetch_and_process_props(sport)
-    elif(market == "moneyline"):
+    elif market == "moneyline":
         fetch_and_process_moneyline(sport)
-    else:
+    elif market == "all":
         fetch_and_process(sport)
-    
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid market. Use one of: prop, moneyline, all.",
+        )
+
+    return {"status": "ok", "sport": sport, "market": market}
 
 
 
