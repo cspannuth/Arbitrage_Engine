@@ -101,7 +101,7 @@ def upsert_prop_opportunities(opportunities, min_profit_percent=1.99):
     return rows
 
 
-def upsert_arbitrage_opportunities(opportunities, min_profit_percent=0.0):
+def upsert_arbitrage_opportunities(opportunities, min_profit_percent=1.99):
     """
     Input: opportunities (list[dict]), min_profit_percent (float)
     Output: dict[str, list[dict]]

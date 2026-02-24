@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Header
 import argparse
 
 from app.config import get_prop_markets
@@ -43,6 +43,45 @@ def get_prop_arbitrage(min_profit: float = 0.0):
         .execute()
     )
     return response.data
+
+def extract_auth_token(authorization: str | None):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise AssertionError
+    token = authorization.split(" ", 1)[1]
+    return token
+
+@app.get("/arbitrage/fetch")
+async def fetch_from_api(request: Request, authorization: str | None = Header(default=None)):
+    """
+    Input: sport (str), market (str), key (str)
+    Output API Status (str)
+    A query based access point to call the arbitrage; Secured by a key value parameter.
+    """
+    jwt = extract_auth_token(authorization)
+
+    try:
+        user_response = supabase.auth.get_user(jwt)
+        user = user_response.user
+        if not user:
+            raise AssertionError
+    except Exception:
+        raise AssertionError
+
+    body = await request.json()
+    sport = body.get("sport")
+    market = body.get("market")
+
+    if not sport or not market:
+        raise AssertionError
+    
+    if(market == "prop"):
+        fetch_and_process_props(sport)
+    elif(market == "moneyline"):
+        fetch_and_process_moneyline(sport)
+    else:
+        fetch_and_process(sport)
+    
+
 
 
 @app.get("/")
