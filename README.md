@@ -1,6 +1,6 @@
 # Sportsbook Arbitrage Engine
 
-> This repo stores the backend for deployment of the arbitrage engine.
+> The backend logic for my full stack Sportsbook Arbitrage Detector
 
 ---
 
@@ -44,13 +44,14 @@ incorporates it!
 
 ## 🏗 Architecture
 
-Describe:
+Architecture:
 - Separated into a scalabale file structure
 - Every function in the backend is currently meant
   to call itself for the user to make a simple
   authenticated call to the API
 - Further segmentation is in progress, and will be needed
   upon the addition of new features.
+- Ran with Uvicorn for testing purposes
   
 ## 👤 Author
 
