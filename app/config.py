@@ -12,13 +12,15 @@ ODDS_API_FORMAT = "american"
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-CORS_ALLOW_ORIGINS = [
-    origin.strip()
-    for origin in os.environ.get(
-        "CORS_ALLOW_ORIGINS", "http://localhost:3000,http://localhost:5173"
-    ).split(",")
-    if origin.strip()
-]
+
+raw_cors_origins = os.environ.get("CORS_ALLOW_ORIGINS", "")
+split_cors_origins = raw_cors_origins.split(",")
+CORS_ALLOW_ORIGINS = []
+
+for origin in split_cors_origins:
+    cleaned_origin = origin.strip()
+    if cleaned_origin:
+        CORS_ALLOW_ORIGINS.append(cleaned_origin)
 
 MONEYLINE_ARBITRAGE_TABLE = "moneyline_arbitrage_opportunities"
 MONEYLINE_CONFLICT_KEYS = "game_id,over_book,under_book"
@@ -54,7 +56,7 @@ def resolve_sport_key(sport_key):
     """
     Input: sport_key (str)
     Output: str
-    Resolve a user-provided sport alias to the canonical Odds API sport key. Return the original value when no alias mapping exists.
+    Change a short sport alias into the full Odds API sport key. Return the original value if there is no matching alias.
     """
     return SPORT_KEY_ALIASES.get(sport_key, sport_key)
 
@@ -63,6 +65,6 @@ def get_prop_markets(sport_key):
     """
     Input: sport_key (str)
     Output: list[str]
-    Get configured prop market keys for a sport after alias resolution. Return an empty list when no markets are configured.
+    Get the configured prop markets for a sport after alias resolution. Return an empty list if the sport has no prop markets set.
     """
     return PROP_MARKETS_BY_SPORT.get(resolve_sport_key(sport_key), [])

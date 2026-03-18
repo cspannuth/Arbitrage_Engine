@@ -16,7 +16,7 @@ def odds_to_probability(odds):
     """
     Input: odds (int | float)
     Output: float
-    Convert American odds into implied probability as a decimal value. Positive and negative odds are handled using the standard sportsbook formulas.
+    Convert American odds into implied probability as a decimal. Handle both positive and negative odds.
     """
     if odds > 0:
         return 100 / (odds + 100)
@@ -27,7 +27,7 @@ def _request(path, markets):
     """
     Input: path (str), markets (list[str])
     Output: dict | list
-    Send an HTTP request to The Odds API for the given path and markets. Raise an HTTP error for non-success responses and return the parsed JSON payload.
+    Send a request to The Odds API for the given path and markets. Raise an error if the response is not successful, then return the JSON data.
     """
     response = requests.get(
         f"{ODDS_API_BASE_URL}{path}",
@@ -47,7 +47,7 @@ def _request_with_429_retry(path, markets, max_retries=3):
     """
     Input: path (str), markets (list[str]), max_retries (int)
     Output: dict | list
-    Request Odds API data with retry behavior for HTTP 429 responses. Respect `Retry-After` when provided and otherwise back off exponentially before retrying.
+    Request Odds API data and retry if the API returns HTTP 429. Use `Retry-After` when it is available, otherwise wait longer after each retry.
     """
     attempt = 0
     while True:
@@ -75,7 +75,7 @@ def fetch_upcoming_games(sport_key):
     """
     Input: sport_key (str)
     Output: list[dict]
-    Fetch upcoming games for a sport using the moneyline market (`h2h`). Resolve aliases first so callers can pass shorthand sport keys.
+    Fetch upcoming games for a sport using the moneyline market (`h2h`). Resolve aliases first so shorthand sport keys still work.
     """
     sport = resolve_sport_key(sport_key)
     return _request(f"/sports/{sport}/odds", ["h2h"])
@@ -85,7 +85,7 @@ def fetch_event_props(sport_key, event_id, markets):
     """
     Input: sport_key (str), event_id (str), markets (list[str])
     Output: tuple[dict, int]
-    Fetch prop odds for a single event and market list with 429 retry handling. Return an empty payload and one request error when the fetch ultimately fails.
+    Fetch prop odds for one event with 429 retry handling. Return an empty payload and one request error if the fetch still fails.
     """
     if not markets:
         return {}, 0
@@ -102,18 +102,20 @@ def fetch_event_props(sport_key, event_id, markets):
         return {}, 1
 
 
-def normalize_moneyline_odds(raw_games):
+def normalize_moneyline_odds(raw_games, sport_key=None):
     """
     Input: raw_games (list[dict])
     Output: dict[str, dict]
-    Normalize raw moneyline game payloads into a structure keyed by game ID and bookmaker. Include odds and implied probabilities for each team outcome.
+    Normalize raw moneyline data into a structure grouped by game ID and sportsbook. Include odds, implied probabilities, and sport data for each game.
     """
     normalized = {}
+    resolved_sport = resolve_sport_key(sport_key) if sport_key else None
 
     for game in raw_games:
         game_id = game["id"]
         game_data = {
             "game_id": game_id,
+            "sport": game.get("sport_key") or resolved_sport,
             "home_team": game["home_team"],
             "away_team": game["away_team"],
             "commence_time": game.get("commence_time"),
@@ -125,15 +127,18 @@ def normalize_moneyline_odds(raw_games):
             if not book_name:
                 continue
 
-            market = next(
-                (m for m in bookmaker.get("markets", []) if m.get("key") == "h2h"),
-                None,
-            )
-            if not market:
+            selected_market = None
+            for market in bookmaker.get("markets", []):
+                market_key = market.get("key")
+                if market_key == "h2h":
+                    selected_market = market
+                    break
+
+            if selected_market is None:
                 continue
 
             teams = {}
-            for outcome in market.get("outcomes", []):
+            for outcome in selected_market.get("outcomes", []):
                 team = outcome.get("name")
                 odds = outcome.get("price")
                 if team is None or odds is None:
@@ -156,7 +161,7 @@ def normalize_prop_odds(game_id, raw_event_odds):
     """
     Input: game_id (str), raw_event_odds (dict)
     Output: dict[str, dict]
-    Normalize raw event prop data into game, market, and player-line buckets. Store Over/Under odds and implied probabilities per sportsbook for arbitrage detection.
+    Normalize raw prop data into game, market, and player-line groups. Store Over and Under odds with implied probabilities for arbitrage checks.
     """
     normalized = {game_id: {}}
 
@@ -170,7 +175,10 @@ def normalize_prop_odds(game_id, raw_event_odds):
             if not market_type:
                 continue
 
-            market_bucket = normalized[game_id].setdefault(market_type, {})
+            if market_type not in normalized[game_id]:
+                normalized[game_id][market_type] = {}
+
+            market_bucket = normalized[game_id][market_type]
 
             for outcome in market.get("outcomes", []):
                 side = outcome.get("name")
@@ -184,15 +192,19 @@ def normalize_prop_odds(game_id, raw_event_odds):
                     continue
 
                 player_line_key = f"{player}|{line}"
-                entry = market_bucket.setdefault(
-                    player_line_key,
-                    {
+                if player_line_key not in market_bucket:
+                    market_bucket[player_line_key] = {
                         "player": player,
                         "line": line,
                         "books": {},
-                    },
-                )
-                book_entry = entry["books"].setdefault(book_name, {})
+                    }
+
+                player_line_entry = market_bucket[player_line_key]
+
+                if book_name not in player_line_entry["books"]:
+                    player_line_entry["books"][book_name] = {}
+
+                book_entry = player_line_entry["books"][book_name]
                 book_entry[side] = {
                     "odds": odds,
                     "implied_prob": odds_to_probability(odds),

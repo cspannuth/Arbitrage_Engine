@@ -2,7 +2,7 @@ def detect_two_way_arbitrage(side_a, side_b):
     """
     Input: side_a (dict | None), side_b (dict | None)
     Output: dict | None
-    Determine whether two opposing sides create an arbitrage opportunity based on implied probabilities. Return pricing and profit metadata only when the combined implied probability is below one.
+    Check if two opposite sides create an arbitrage opportunity based on implied probabilities. Return price and profit data only when the total implied probability is below one.
     """
     if not side_a or not side_b:
         return None
@@ -24,29 +24,40 @@ def _best_price_for_team(game_data, team_name):
     """
     Input: game_data (dict), team_name (str)
     Output: dict | None
-    Find the best available odds for a specific team across all books in a game. Return `None` when no qualifying team price is available.
+    Find the best odds for one team across all sportsbooks in a game. Return `None` if no valid team price is found.
     """
-    best = None
+    best_book = None
+    best_odds = None
+    best_implied_prob = None
+
     for book, teams in game_data.get("books", {}).items():
         team_data = teams.get(team_name)
         if not team_data:
             continue
 
         odds = team_data["odds"]
-        if best is None or odds > best["odds"]:
-            best = {
-                "book": book,
-                "odds": odds,
-                "implied_prob": team_data["implied_prob"],
-            }
-    return best
+        implied_prob = team_data["implied_prob"]
+
+        if best_odds is None or odds > best_odds:
+            best_book = book
+            best_odds = odds
+            best_implied_prob = implied_prob
+
+    if best_book is None:
+        return None
+
+    return {
+        "book": best_book,
+        "odds": best_odds,
+        "implied_prob": best_implied_prob,
+    }
 
 
 def detect_moneyline_arbitrage(games_by_id):
     """
     Input: games_by_id (dict[str, dict])
     Output: list[dict]
-    Detect moneyline arbitrage opportunities from normalized game odds data. Build standardized opportunity rows for each game where the home and away best prices form an arbitrage.
+    Find moneyline arbitrage opportunities from normalized game odds data. Build standard opportunity rows when the best home and away prices create an arbitrage.
     """
     opportunities = []
 
@@ -57,17 +68,21 @@ def detect_moneyline_arbitrage(games_by_id):
         if not arb:
             continue
 
-        opportunities.append(
-            {
-                "game_id": game_id,
-                "market_type": "h2h",
-                "player_name": None,
-                "line_value": None,
-                "home_team": game["home_team"],
-                "away_team": game["away_team"],
-                **arb,
-            }
-        )
+        opportunity = {
+            "game_id": game_id,
+            "sport": game.get("sport"),
+            "market_type": "h2h",
+            "player_name": None,
+            "line_value": None,
+            "home_team": game["home_team"],
+            "away_team": game["away_team"],
+            "profit_percent": arb["profit_percent"],
+            "over_book": arb["over_book"],
+            "under_book": arb["under_book"],
+            "over_odds": arb["over_odds"],
+            "under_odds": arb["under_odds"],
+        }
+        opportunities.append(opportunity)
 
     return opportunities
 
@@ -76,29 +91,40 @@ def _best_prop_side(books_data, side_name):
     """
     Input: books_data (dict[str, dict]), side_name (str)
     Output: dict | None
-    Find the best odds for one prop side, typically Over or Under, across sportsbooks. Return `None` when that side is not present in any book entry.
+    Find the best odds for one prop side, usually Over or Under, across sportsbooks. Return `None` if that side is missing everywhere.
     """
-    best = None
+    best_book = None
+    best_odds = None
+    best_implied_prob = None
+
     for book, sides in books_data.items():
         side_data = sides.get(side_name)
         if not side_data:
             continue
 
         odds = side_data["odds"]
-        if best is None or odds > best["odds"]:
-            best = {
-                "book": book,
-                "odds": odds,
-                "implied_prob": side_data["implied_prob"],
-            }
-    return best
+        implied_prob = side_data["implied_prob"]
+
+        if best_odds is None or odds > best_odds:
+            best_book = book
+            best_odds = odds
+            best_implied_prob = implied_prob
+
+    if best_book is None:
+        return None
+
+    return {
+        "book": best_book,
+        "odds": best_odds,
+        "implied_prob": best_implied_prob,
+    }
 
 
 def detect_prop_arbitrage(normalized_props):
     """
     Input: normalized_props (dict[str, dict])
     Output: list[dict]
-    Detect prop arbitrage opportunities from normalized per-game prop markets. Return standardized rows for player-line combinations where Over and Under prices create arbitrage.
+    Find prop arbitrage opportunities from normalized prop markets for each game. Return standard rows when Over and Under prices create an arbitrage.
     """
     opportunities = []
 
@@ -111,16 +137,19 @@ def detect_prop_arbitrage(normalized_props):
                 if not arb:
                     continue
 
-                opportunities.append(
-                    {
-                        "game_id": game_id,
-                        "market_type": market_type,
-                        "player_name": player_line_data["player"],
-                        "line_value": player_line_data["line"],
-                        "home_team": None,
-                        "away_team": None,
-                        **arb,
-                    }
-                )
+                opportunity = {
+                    "game_id": game_id,
+                    "market_type": market_type,
+                    "player_name": player_line_data["player"],
+                    "line_value": player_line_data["line"],
+                    "home_team": None,
+                    "away_team": None,
+                    "profit_percent": arb["profit_percent"],
+                    "over_book": arb["over_book"],
+                    "under_book": arb["under_book"],
+                    "over_odds": arb["over_odds"],
+                    "under_odds": arb["under_odds"],
+                }
+                opportunities.append(opportunity)
 
     return opportunities

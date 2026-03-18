@@ -19,10 +19,11 @@ def _format_moneyline_opportunity(event):
     """
     Input: event (dict)
     Output: dict
-    Transform a moneyline arbitrage event into the Supabase table row shape. Add a UTC timestamp so each upsert records when the opportunity was detected.
+    Change a moneyline arbitrage event into the row shape used by Supabase. Add a UTC timestamp so each upsert shows when the opportunity was found.
     """
     return {
         "game_id": event["game_id"],
+        "sport": event.get("sport"),
         "home_team": event.get("home_team"),
         "away_team": event.get("away_team"),
         "over_book": event["over_book"],
@@ -38,13 +39,14 @@ def _format_prop_opportunity(event):
     """
     Input: event (dict)
     Output: dict
-    Transform a prop arbitrage event into the Supabase table row shape. Add a UTC timestamp so each upsert records when the opportunity was detected.
+    Change a prop arbitrage event into the row shape used by Supabase. Add a UTC timestamp so each upsert shows when the opportunity was found.
     """
     return {
         "game_id": event["game_id"],
         "market_type": event["market_type"],
         "player_name": event.get("player_name"),
         "line_value": event.get("line_value"),
+        "sport": event.get("sport"),
         "home_team": event.get("home_team"),
         "away_team": event.get("away_team"),
         "over_book": event["over_book"],
@@ -60,7 +62,7 @@ def upsert_moneyline_opportunities(opportunities, min_profit_percent=1.99):
     """
     Input: opportunities (list[dict]), min_profit_percent (float)
     Output: list[dict]
-    Filter and upsert moneyline opportunities that meet the minimum profit threshold. Return the rows sent to Supabase, or an empty list when nothing qualifies.
+    Filter and upsert moneyline opportunities that meet the minimum profit. Return the rows sent to Supabase, or an empty list if nothing qualifies.
     """
     rows = [
         _format_moneyline_opportunity(opp)
@@ -82,7 +84,7 @@ def upsert_prop_opportunities(opportunities, min_profit_percent=1.99):
     """
     Input: opportunities (list[dict]), min_profit_percent (float)
     Output: list[dict]
-    Filter and upsert prop opportunities that meet the minimum profit threshold. Return the rows sent to Supabase, or an empty list when nothing qualifies.
+    Filter and upsert prop opportunities that meet the minimum profit. Return the rows sent to Supabase, or an empty list if nothing qualifies.
     """
     rows = [
         _format_prop_opportunity(opp)
@@ -105,7 +107,7 @@ def upsert_arbitrage_opportunities(opportunities, min_profit_percent=1.99):
     """
     Input: opportunities (list[dict]), min_profit_percent (float)
     Output: dict[str, list[dict]]
-    Split mixed opportunities into moneyline and prop groups by market type. Upsert each group with the provided threshold and return both result sets.
+    Split mixed opportunities into moneyline and prop groups by market type. Upsert each group with the given threshold and return both result sets.
     """
     moneyline_opps = [opp for opp in opportunities if opp.get("market_type") == "h2h"]
     prop_opps = [opp for opp in opportunities if opp.get("market_type") != "h2h"]

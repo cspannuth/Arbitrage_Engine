@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import argparse
 from pydantic import BaseModel
 
-from app.config import CORS_ALLOW_ORIGINS, get_prop_markets
+from app.config import CORS_ALLOW_ORIGINS, get_prop_markets, resolve_sport_key
 from app.db import supabase_client
 from app.db.supabase_client import supabase
 from app.services import arbitrage_engine, odds_fetcher
@@ -28,7 +28,7 @@ def get_moneyline_arbitrage(min_profit: float = 0.0):
     """
     Input: min_profit (float)
     Output: list[dict]
-    Fetch persisted moneyline arbitrage rows from Supabase above a minimum profit threshold. Return rows sorted by descending profit percentage.
+    Get saved moneyline arbitrage rows from Supabase that meet the minimum profit. Return the rows sorted by profit from highest to lowest.
     """
     response = (
         supabase
@@ -46,7 +46,7 @@ def get_prop_arbitrage(min_profit: float = 0.0):
     """
     Input: min_profit (float)
     Output: list[dict]
-    Fetch persisted prop arbitrage rows from Supabase above a minimum profit threshold. Return rows sorted by descending profit percentage.
+    Get saved prop arbitrage rows from Supabase that meet the minimum profit. Return the rows sorted by profit from highest to lowest.
     """
     response = (
         supabase
@@ -71,7 +71,7 @@ async def fetch_from_api(payload: FetchFromApiRequest, authorization: str | None
     """
     Input: sport (str), market (str), Authorization bearer token
     Output: dict
-    Trigger arbitrage processing from an authenticated frontend request.
+    Start arbitrage processing from an authenticated frontend request.
     """
     jwt = extract_auth_token(authorization)
 
@@ -88,18 +88,22 @@ async def fetch_from_api(payload: FetchFromApiRequest, authorization: str | None
 
     if not sport or not market:
         raise HTTPException(status_code=400, detail="Both sport and market are required.")
-    
+
+    selected_fetch_function = None
+
     if market == "prop":
-        fetch_and_process_props(sport)
+        selected_fetch_function = fetch_and_process_props
     elif market == "moneyline":
-        fetch_and_process_moneyline(sport)
+        selected_fetch_function = fetch_and_process_moneyline
     elif market == "all":
-        fetch_and_process(sport)
+        selected_fetch_function = fetch_and_process
     else:
         raise HTTPException(
             status_code=400,
             detail="Invalid market. Use one of: prop, moneyline, all.",
         )
+
+    selected_fetch_function(sport)
 
     return {"status": "ok", "sport": sport, "market": market}
 
@@ -110,7 +114,7 @@ def root():
     """
     Input: None
     Output: dict[str, str]
-    Provide a lightweight health-check response for the API root endpoint. This helps confirm that the FastAPI service is running.
+    Return a simple health-check response so we know the API is running.
     """
     return {"status": "Arbitrage API is Healthy"}
 
@@ -119,10 +123,10 @@ def fetch_moneyline_opportunities(sport_key):
     """
     Input: sport_key (str)
     Output: tuple[list[dict], dict[str, dict]]
-    Fetch and normalize upcoming games, then detect moneyline arbitrage opportunities. Return both opportunities and normalized game data for reuse in prop processing.
+    Fetch and normalize upcoming games, then find moneyline arbitrage opportunities. Return the opportunities and the normalized game data for later prop work.
     """
     raw_games = odds_fetcher.fetch_upcoming_games(sport_key)
-    normalized_games = odds_fetcher.normalize_moneyline_odds(raw_games)
+    normalized_games = odds_fetcher.normalize_moneyline_odds(raw_games, sport_key=sport_key)
     moneyline_opps = arbitrage_engine.detect_moneyline_arbitrage(normalized_games)
     return moneyline_opps, normalized_games
 
@@ -131,35 +135,55 @@ def fetch_prop_opportunities(sport_key, normalized_games=None):
     """
     Input: sport_key (str), normalized_games (dict[str, dict] | None)
     Output: tuple[list[dict], int]
-    Fetch and process event-level prop odds for each normalized game in the selected sport. Return detected prop opportunities and a count of request failures.
+    Fetch and process prop odds for each game in the selected sport. Return the prop opportunities and the number of request failures.
     """
     if normalized_games is None:
         raw_games = odds_fetcher.fetch_upcoming_games(sport_key)
-        normalized_games = odds_fetcher.normalize_moneyline_odds(raw_games)
+        normalized_games = odds_fetcher.normalize_moneyline_odds(raw_games, sport_key=sport_key)
 
     opportunities = []
     prop_markets = get_prop_markets(sport_key)
     prop_request_errors = 0
 
-    if prop_markets:
-        for game_id in normalized_games:
-            raw_props, request_errors = odds_fetcher.fetch_event_props(
-                sport_key=sport_key,
-                event_id=game_id,
-                markets=prop_markets,
-            )
-            prop_request_errors += request_errors
-            if not raw_props:
-                continue
+    if not prop_markets:
+        return opportunities, prop_request_errors
 
-            normalized_props = odds_fetcher.normalize_prop_odds(game_id, raw_props)
-            prop_opps = arbitrage_engine.detect_prop_arbitrage(normalized_props)
-            home_team = normalized_games[game_id]["home_team"]
-            away_team = normalized_games[game_id]["away_team"]
-            for opp in prop_opps:
-                opp["home_team"] = home_team
-                opp["away_team"] = away_team
-            opportunities.extend(prop_opps)
+    for game_id in normalized_games:
+        raw_props, request_errors = odds_fetcher.fetch_event_props(
+            sport_key=sport_key,
+            event_id=game_id,
+            markets=prop_markets,
+        )
+        prop_request_errors += request_errors
+        if not raw_props:
+            continue
+
+        normalized_props = odds_fetcher.normalize_prop_odds(game_id, raw_props)
+        prop_opps = arbitrage_engine.detect_prop_arbitrage(normalized_props)
+
+        game_details = normalized_games[game_id]
+        home_team = game_details["home_team"]
+        away_team = game_details["away_team"]
+        resolved_sport = game_details.get("sport")
+        if not resolved_sport:
+            resolved_sport = resolve_sport_key(sport_key)
+
+        for opp in prop_opps:
+            enriched_opp = {
+                "game_id": opp["game_id"],
+                "market_type": opp["market_type"],
+                "player_name": opp["player_name"],
+                "line_value": opp["line_value"],
+                "home_team": home_team,
+                "away_team": away_team,
+                "sport": resolved_sport,
+                "profit_percent": opp["profit_percent"],
+                "over_book": opp["over_book"],
+                "under_book": opp["under_book"],
+                "over_odds": opp["over_odds"],
+                "under_odds": opp["under_odds"],
+            }
+            opportunities.append(enriched_opp)
 
     return opportunities, prop_request_errors
 
@@ -168,7 +192,7 @@ def fetch_and_process_moneyline(sport_key):
     """
     Input: sport_key (str)
     Output: list[dict]
-    Run the moneyline pipeline end-to-end for one sport and upsert qualifying rows. Print a short run summary with counts for visibility.
+    Run the full moneyline flow for one sport and upsert the rows that qualify. Print a short summary at the end.
     """
     moneyline_opps, _ = fetch_moneyline_opportunities(sport_key)
     saved_rows = supabase_client.upsert_moneyline_opportunities(moneyline_opps)
@@ -182,7 +206,7 @@ def fetch_and_process_props(sport_key):
     """
     Input: sport_key (str)
     Output: list[dict]
-    Run the props pipeline end-to-end for one sport and upsert qualifying rows. Print a short run summary including request error counts.
+    Run the full props flow for one sport and upsert the rows that qualify. Print a short summary with request errors.
     """
     _, normalized_games = fetch_moneyline_opportunities(sport_key)
     prop_opps, prop_request_errors = fetch_prop_opportunities(
@@ -200,7 +224,8 @@ def fetch_and_process(sport_key):
     """
     Input: sport_key (str)
     Output: None
-    Run both moneyline and prop pipelines for one sport using shared normalized game data. Print a combined summary of detected opportunities, request errors, and upsert counts.
+    Run both the moneyline and prop flows for one sport using shared game data.
+    Print one summary with the opportunities found, request errors, and upsert counts.
     """
     moneyline_opps, normalized_games = fetch_moneyline_opportunities(sport_key)
     prop_opps, prop_request_errors = fetch_prop_opportunities(sport_key, normalized_games=normalized_games)
@@ -216,6 +241,9 @@ def fetch_and_process(sport_key):
     )
 
 if __name__ == "__main__":
+    """
+    Run the script from the command line for testing.
+    """
     parser = argparse.ArgumentParser(description="Run arbitrage processing")
     parser.add_argument(
         "-sport",
