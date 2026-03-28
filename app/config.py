@@ -25,9 +25,9 @@ for origin in split_cors_origins:
 MONEYLINE_ARBITRAGE_TABLE = "moneyline_arbitrage_opportunities"
 MONEYLINE_CONFLICT_KEYS = "game_id,over_book,under_book"
 PROP_ARBITRAGE_TABLE = "prop_arbitrage_opportunities"
-PROP_CONFLICT_KEYS = (
-    "game_id,market_type,player_name,line_value,over_book,under_book"
-)
+PROP_CONFLICT_KEYS = "game_id,market_type,player_name,line_value,over_book,under_book"
+SPREAD_ARBITRAGE_TABLE = "spread_arbitrage_opportunities"
+SPREAD_CONFLICT_KEYS = "game_id,line_value,home_book,away_book"
 
 SPORT_KEY_ALIASES = {
     "nhl": "icehockey_nhl",

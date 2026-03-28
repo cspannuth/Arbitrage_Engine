@@ -3,7 +3,14 @@ from fastapi.middleware.cors import CORSMiddleware
 import argparse
 from pydantic import BaseModel
 
-from app.config import CORS_ALLOW_ORIGINS, get_prop_markets, resolve_sport_key
+from app.config import (
+    CORS_ALLOW_ORIGINS,
+    MONEYLINE_ARBITRAGE_TABLE,
+    PROP_ARBITRAGE_TABLE,
+    SPREAD_ARBITRAGE_TABLE,
+    get_prop_markets,
+    resolve_sport_key,
+)
 from app.db import supabase_client
 from app.db.supabase_client import supabase
 from app.services import arbitrage_engine, odds_fetcher
@@ -32,7 +39,7 @@ def get_moneyline_arbitrage(min_profit: float = 0.0):
     """
     response = (
         supabase
-        .table("moneyline_arbitrage_opportunities")
+        .table(MONEYLINE_ARBITRAGE_TABLE)
         .select("*")
         .gte("profit_percent", min_profit)
         .order("profit_percent", desc=True)
@@ -50,7 +57,25 @@ def get_prop_arbitrage(min_profit: float = 0.0):
     """
     response = (
         supabase
-        .table("prop_arbitrage_opportunities")
+        .table(PROP_ARBITRAGE_TABLE)
+        .select("*")
+        .gte("profit_percent", min_profit)
+        .order("profit_percent", desc=True)
+        .execute()
+    )
+    return response.data
+
+
+@app.get("/arbitrage/spreads")
+def get_spread_arbitrage(min_profit: float = 0.0):
+    """
+    Input: min_profit (float)
+    Output: list[dict]
+    Get saved spread arbitrage rows from Supabase that meet the minimum profit. Return the rows sorted by profit from highest to lowest.
+    """
+    response = (
+        supabase
+        .table(SPREAD_ARBITRAGE_TABLE)
         .select("*")
         .gte("profit_percent", min_profit)
         .order("profit_percent", desc=True)
@@ -95,12 +120,14 @@ async def fetch_from_api(payload: FetchFromApiRequest, authorization: str | None
         selected_fetch_function = fetch_and_process_props
     elif market == "moneyline":
         selected_fetch_function = fetch_and_process_moneyline
+    elif market == "spread":
+        selected_fetch_function = fetch_and_process_spreads
     elif market == "all":
         selected_fetch_function = fetch_and_process
     else:
         raise HTTPException(
             status_code=400,
-            detail="Invalid market. Use one of: prop, moneyline, all.",
+            detail="Invalid market. Use one of: prop, moneyline, spread, all.",
         )
 
     selected_fetch_function(sport)
@@ -188,6 +215,18 @@ def fetch_prop_opportunities(sport_key, normalized_games=None):
     return opportunities, prop_request_errors
 
 
+def fetch_spread_opportunities(sport_key):
+    """
+    Input: sport_key (str)
+    Output: tuple[list[dict], dict[str, dict]]
+    Fetch and normalize upcoming games for spreads, then find spread arbitrage opportunities.
+    """
+    raw_games = odds_fetcher.fetch_upcoming_spreads(sport_key)
+    normalized_games = odds_fetcher.normalize_spread_odds(raw_games, sport_key=sport_key)
+    spread_opps = arbitrage_engine.detect_spread_arbitrage(normalized_games)
+    return spread_opps, normalized_games
+
+
 def fetch_and_process_moneyline(sport_key):
     """
     Input: sport_key (str)
@@ -198,6 +237,20 @@ def fetch_and_process_moneyline(sport_key):
     saved_rows = supabase_client.upsert_moneyline_opportunities(moneyline_opps)
     print(
         f"Moneyline run complete. Opportunities: {len(moneyline_opps)}. Upserted: {len(saved_rows)}."
+    )
+    return saved_rows
+
+
+def fetch_and_process_spreads(sport_key):
+    """
+    Input: sport_key (str)
+    Output: list[dict]
+    Run the full spread flow for one sport and upsert the rows that qualify. Print a short summary at the end.
+    """
+    spread_opps, _ = fetch_spread_opportunities(sport_key)
+    saved_rows = supabase_client.upsert_spread_opportunities(spread_opps)
+    print(
+        f"Spread run complete. Opportunities: {len(spread_opps)}. Upserted: {len(saved_rows)}."
     )
     return saved_rows
 
@@ -224,19 +277,23 @@ def fetch_and_process(sport_key):
     """
     Input: sport_key (str)
     Output: None
-    Run both the moneyline and prop flows for one sport using shared game data.
+    Run the moneyline, spread, and prop flows for one sport.
     Print one summary with the opportunities found, request errors, and upsert counts.
     """
     moneyline_opps, normalized_games = fetch_moneyline_opportunities(sport_key)
+    spread_opps, _ = fetch_spread_opportunities(sport_key)
     prop_opps, prop_request_errors = fetch_prop_opportunities(sport_key, normalized_games=normalized_games)
     moneyline_rows = supabase_client.upsert_moneyline_opportunities(moneyline_opps)
+    spread_rows = supabase_client.upsert_spread_opportunities(spread_opps)
     prop_rows = supabase_client.upsert_prop_opportunities(prop_opps)
     print(
         f"Processed {len(normalized_games)} games. "
         f"Moneyline arbs: {len(moneyline_opps)}. "
+        f"Spread arbs: {len(spread_opps)}. "
         f"Prop arbs: {len(prop_opps)}. "
         f"Prop request errors: {prop_request_errors}. "
         f"Upserted moneyline: {len(moneyline_rows)}. "
+        f"Upserted spreads: {len(spread_rows)}. "
         f"Upserted props: {len(prop_rows)}."
     )
 
@@ -252,7 +309,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-mode",
-        choices=["all", "moneyline", "props"],
+        choices=["all", "moneyline", "spreads", "props"],
         default="all",
         help="Which pipeline to run",
     )
@@ -260,6 +317,8 @@ if __name__ == "__main__":
 
     if args.mode == "moneyline":
         fetch_and_process_moneyline(args.sport)
+    elif args.mode == "spreads":
+        fetch_and_process_spreads(args.sport)
     elif args.mode == "props":
         fetch_and_process_props(args.sport)
     else:

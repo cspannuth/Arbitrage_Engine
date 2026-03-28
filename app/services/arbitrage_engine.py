@@ -57,7 +57,7 @@ def detect_moneyline_arbitrage(games_by_id):
     """
     Input: games_by_id (dict[str, dict])
     Output: list[dict]
-    Find moneyline arbitrage opportunities from normalized game odds data. Build standard opportunity rows when the best home and away prices create an arbitrage.
+    Find moneyline arbitrage opportunities from normalized game odds data.
     """
     opportunities = []
 
@@ -87,19 +87,58 @@ def detect_moneyline_arbitrage(games_by_id):
     return opportunities
 
 
+def detect_spread_arbitrage(games_by_id):
+    """
+    Input: games_by_id (dict[str, dict])
+    Output: list[dict]
+    Find spread arbitrage opportunities from normalized game odds data.
+    Only compare home and away prices from the same spread line.
+    """
+    opportunities = []
+
+    for game_id, game in games_by_id.items():
+        for line_value, line_data in game.get("lines", {}).items():
+            home = _best_prop_side(line_data["home"], "home")
+            away = _best_prop_side(line_data["away"], "away")
+            arb = detect_two_way_arbitrage(home, away)
+            if not arb:
+                continue
+
+            opportunity = {
+                "game_id": game_id,
+                "sport": game.get("sport"),
+                "market_type": "spreads",
+                "line_value": line_value,
+                "home_team": game["home_team"],
+                "away_team": game["away_team"],
+                "profit_percent": arb["profit_percent"],
+                "home_book": arb["over_book"],
+                "away_book": arb["under_book"],
+                "home_odds": arb["over_odds"],
+                "away_odds": arb["under_odds"],
+            }
+            opportunities.append(opportunity)
+
+    return opportunities
+
+
 def _best_prop_side(books_data, side_name):
     """
     Input: books_data (dict[str, dict]), side_name (str)
     Output: dict | None
-    Find the best odds for one prop side, usually Over or Under, across sportsbooks. Return `None` if that side is missing everywhere.
+    Find the best odds for one named side across sportsbooks. Return `None` if that side is missing everywhere.
     """
     best_book = None
     best_odds = None
     best_implied_prob = None
 
     for book, sides in books_data.items():
-        side_data = sides.get(side_name)
-        if not side_data:
+        if side_name in sides:
+            side_data = sides.get(side_name)
+        else:
+            side_data = sides
+
+        if not side_data or "odds" not in side_data or "implied_prob" not in side_data:
             continue
 
         odds = side_data["odds"]

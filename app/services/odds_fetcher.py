@@ -102,11 +102,86 @@ def fetch_event_props(sport_key, event_id, markets):
         return {}, 1
 
 
+def fetch_upcoming_spreads(sport_key):
+    """
+    Input: sport_key (str)
+    Output: list[dict]
+    Fetch upcoming games for a sport using the spread market.
+    """
+    sport = resolve_sport_key(sport_key)
+    return _request(f"/sports/{sport}/odds", ["spreads"])
+
+
+def normalize_spread_odds(raw_games, sport_key=None):
+    """
+    Input: raw_games (list[dict])
+    Output: dict[str, dict]
+    Normalize raw spread data into a structure grouped by game ID and line value.
+    Keep home and away side prices separate so only matching lines are compared.
+    """
+    normalized = {}
+    resolved_sport = resolve_sport_key(sport_key) if sport_key else None
+
+    for game in raw_games:
+        game_id = game["id"]
+        game_data = {
+            "game_id": game_id,
+            "sport": game.get("sport_key") or resolved_sport,
+            "home_team": game["home_team"],
+            "away_team": game["away_team"],
+            "commence_time": game.get("commence_time"),
+            "lines": {},
+        }
+
+        for bookmaker in game.get("bookmakers", []):
+            book_name = bookmaker.get("title", bookmaker.get("key"))
+            if not book_name:
+                continue
+
+            selected_market = None
+            for market in bookmaker.get("markets", []):
+                market_key = market.get("key")
+                if market_key == "spreads":
+                    selected_market = market
+                    break
+
+            if selected_market is None:
+                continue
+
+            for outcome in selected_market.get("outcomes", []):
+                team = outcome.get("name")
+                point = outcome.get("point")
+                odds = outcome.get("price")
+                if team is None or point is None or odds is None:
+                    continue
+
+                if team == game["home_team"]:
+                    side_name = "home"
+                elif team == game["away_team"]:
+                    side_name = "away"
+                else:
+                    continue
+
+                line_value = abs(point)
+                if line_value not in game_data["lines"]:
+                    game_data["lines"][line_value] = {"home": {}, "away": {}}
+
+                game_data["lines"][line_value][side_name][book_name] = {
+                    "odds": odds,
+                    "implied_prob": odds_to_probability(odds),
+                    "point": point,
+                }
+
+        normalized[game_id] = game_data
+
+    return normalized
+
+
 def normalize_moneyline_odds(raw_games, sport_key=None):
     """
     Input: raw_games (list[dict])
     Output: dict[str, dict]
-    Normalize raw moneyline data into a structure grouped by game ID and sportsbook. Include odds, implied probabilities, and sport data for each game.
+    Normalize raw moneyline data into a structure grouped by game ID and sportsbook.
     """
     normalized = {}
     resolved_sport = resolve_sport_key(sport_key) if sport_key else None
