@@ -4,7 +4,7 @@
 
 ---
 
-## 📌 Overview
+## Overview
 
 One common issue among just about every person who indulges themselves with gambling is **losing**. 
 What if there was a way to gaurantee that a player can always beat the sportsbook? That is where 
@@ -16,7 +16,7 @@ incorporates it!
 
 ---
 
-## 🚀 Features
+## Features
 
 - Live upon demand fetching of arbitrage opportunities in real sportsbook markets
 - Processes the data received and formats into database ready tables
@@ -27,7 +27,7 @@ incorporates it!
 
 ---
 
-## 🛠 Tech Stack
+## Tech Stack
 
 **Languages**
 - Python
@@ -42,7 +42,7 @@ incorporates it!
 
 ---
 
-## 🏗 Architecture
+## Architecture
 
 Architecture:
 - Separated into a scalabale file structure
@@ -53,7 +53,7 @@ Architecture:
   upon the addition of new features.
 - Ran with Uvicorn for testing purposes
   
-## 👤 Author
+## Author
 
 William Spannuth 
 
